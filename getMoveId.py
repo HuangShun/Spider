@@ -88,7 +88,21 @@ def get_seesaa_movie():
     r = requests.get('http://sougouwiki.com/d/%B0%C2%E3%B7%A4%E9%A4%E9')
     soup = BeautifulSoup(r.text, features="html.parser")
     elements = soup.find(class_='wiki-section-body-1').findAll(class_='outlink')
-    print(elements)
+    for element in elements:
+        if not element['href'].find('pics.dmm.co.jp') == -1:
+            arr = element['href'].split("/")
+            cid = arr[len(arr) - 2]
+            if not check_is_add_by_cid(cid):
+                print(cid)
+
+
+def check_is_add_by_cid(cid):
+    cursor.execute("select * from movie where dmmid= '" + cid + "'")
+    result = cursor.fetchall()
+    if len(result) == 0:
+        return False
+    else:
+        return True
 
 
 def check_is_add(dvd_id):
@@ -126,4 +140,4 @@ def trans():
     conn.close()
 
 
-trans()
+get_seesaa_movie()
