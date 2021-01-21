@@ -1,9 +1,11 @@
 import requests
+import pymysql
+from retrying import retry
 from bs4 import BeautifulSoup
 import urllib.parse
 import os
 # 导入pymysql模块
-import pymysql
+
 
 proxies = {
     'http': '127.0.0.1:10809',
@@ -27,28 +29,32 @@ jav_db_header = {
               '%2Fke1J0iaXpl5kwx8ixZpvreDRyhvkgSShAIKFO8PoppVUHn2Mi6ki3BASrjxBec0O5Anw2naEGeBs3T9OZCWaKNd48kSeucNSbMv8lLa2QmfP5LdK3eK9H474rasr%2B%2BBqQhpRrQKxw%2FRsRcHdFjQohUFEo%2BlDjGds%2F%2FkkzEe40Vu8jldYXGeIFoA8b%2FF%2BO9e0--eG5OsfUiO2WGgYGq--Vh8Rts0QK58tHdmzVpR26A%3D%3D; path=/; expires=Thu, 04 Feb 2021 08:26:23 -0000; HttpOnly; SameSite=Lax '
 }
 
-keyword = '由來ちとせ'
-actor = ''
+keyword = '田中瞳'
+main_actor = ''
 jav_db_link = ''
 jav_library_link = ''
 page = 1
 
 conn = pymysql.connect(host="127.0.0.1", port=3306, user='root', password='123456', database='dmm', charset='utf8')
 cursor = conn.cursor()
-jav_db_insert = "INSERT INTO movie(cover, main_image, dvd_id, dmm_id, title, publish_date, duration, " \
+jav_db_insert = "INSERT INTO movie(main_actor,cover, main_image, dvd_id, dmm_id, title, publish_date, duration, " \
                 "javdb_dvd_series_url, javdb_series, javdb_series_url, javdb_maker, javdb_maker_url, javdb_actor, " \
-                "javdb_tag,jav_db_url,javlibrary_publish, javlibrary_actor, javlibrary_url,  download)" \
-                " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s); "
+                "javdb_tag,jav_db_url,javlibrary_publish,javlibrary_publish_url, javlibrary_actor, javlibrary_url,  " \
+                "javlibrary_tag,download,subtitles)" \
+                " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s); "
+
+jav_library_update = 'UPDATE movie SET cover = %s,javlibrary_publish = %s,javlibrary_publish_url = ' \
+                     '%s,javlibrary_actor = %s ,javlibrary_url = %s , javlibrary_tag = %s where dvd_id = %s'
 
 
 def start():
     global jav_db_link
     global jav_library_link
-    global actor
+    global main_actor
     cursor.execute("select * from javdb_actor where name like '%" + keyword + "%'")
     res = cursor.fetchall()
     if len(res) == 1:
-        actor = res[0][1]
+        main_actor = res[0][1]
         jav_db_link = res[0][2]
     else:
         print("javdb查询失败")
@@ -62,6 +68,7 @@ def start():
         print("javlibrary查询失败")
         return
     get_jav_db_movie()
+    # get_jav_library_movie()
 
 
 def get_jav_db_movie():
@@ -81,7 +88,7 @@ def get_jav_db_movie():
         get_jav_db_movie()
     else:
         page = 1
-        # get_jav_library_movie()
+        get_jav_library_movie()
 
 
 #     https: // pics.dmm.co.jp / mono / movie / adult / venu896 / venu896pl.jpg
@@ -90,8 +97,9 @@ def get_jav_db_movie():
 # https://pics.dmm.co.jp/mono/movie/adult/h_1495bank029/h_1495bank029pl.jpg
 # https://www.dmm.co.jp/mono/dvd/-/detail/=/cid=mide726/?i3_ref=ad&dmmref=pickup001&i3_ord=3
 # https://www.dmm.co.jp/digital/videoa/-/detail/=/cid=mide00726/?i3_ref=list&i3_ord=1
+@retry
 def get_jav_ab_detail(title, jav_db_url):
-    r = requests.get('https://javdb6.com' + jav_db_url, headers=jav_db_header)
+    r = requests.get('https://javdb6.com' + jav_db_url, headers=jav_db_header, timeout=10)
     # print('https://javdb6.com' + jav_db_url)
     soup = BeautifulSoup(r.text, features="html.parser")
     container = soup.find(class_='movie-info-panel')
@@ -112,11 +120,11 @@ def get_jav_ab_detail(title, jav_db_url):
     maker = get_jav_db_maker(panel)[0]
     maker_url = get_jav_db_maker(panel)[1]
     tag = get_jav_db_tag(panel)
-    print(cover, main_image, dvd_id, dmm_id, title, publish_date, duration, dvd_id_url, series, series_url, maker,
-          maker_url, jav_db_actor, tag)
+    print(main_actor, cover, main_image, dvd_id, dmm_id, title, publish_date, duration, dvd_id_url, series, series_url,
+          maker, maker_url, jav_db_actor, tag)
     cursor.execute(jav_db_insert, (
-        cover, main_image, dvd_id, dmm_id, title, publish_date, duration, dvd_id_url, series, series_url, maker,
-        maker_url, jav_db_actor, tag, jav_db_url, '', '', '', 0))
+        main_actor, cover, main_image, dvd_id, dmm_id, title, publish_date, duration, dvd_id_url, series, series_url,
+        maker, maker_url, jav_db_actor, tag, jav_db_url, '', '', '', '', '', 0, 0))
     conn.commit()
 
 
@@ -193,23 +201,70 @@ def get_jav_db_select_panel(item, panels):
 
 def get_jav_library_movie():
     global page
-    r = requests.get('http://www.b47w.com/cn/vl_star.php?&mode=2&s=' + jav_library_link + '&page=' + str(page))
-    print('http://www.b47w.com/cn/vl_star.php?&mode=2&s=' + jav_library_link + '&page=' + str(page))
+    r = requests.get('http://www.b47w.com/tw/' + jav_library_link + '&page=' + str(page) + "&mode=2")
+    print('http://www.b47w.com/tw/' + jav_library_link + '&page=' + str(page) + "&mode=2")
     soup = BeautifulSoup(r.text, features="html.parser")
     elements = soup.findAll(class_='video')
     if len(elements) > 0:
         for element in elements:
             jav_library_url = element.a['href']
-            title = element.find(class_='title').get_text()
             dvd_id = element.find(class_='id').get_text()
-            if not check_is_add(dvd_id):
-                get_jav_db_movie()
-        conn.commit()
+            title = element.find(class_='title').get_text()
+            cover = element.img['src']
+            if not check_is_full(dvd_id):
+                get_jav_library_detail(title, jav_library_url.split('/')[1], 'https:' + cover)
         page += 1
         get_jav_library_movie()
+
+
+def get_jav_library_detail(title, jav_library_url, cover):
+    r = requests.get('http://www.b47w.com/tw/' + jav_library_url)
+    print('http://www.b47w.com/tw/' + jav_library_url)
+    soup = BeautifulSoup(r.text, features="html.parser")
+    container = soup.find(id='video_jacket_info')
+    main_image = 'https' + container.find(id='video_jacket_img')['src']
+    dvd_id = container.find(id='video_id').find(class_='text').get_text()
+    dmm_id = ''
+    dvd_id_url = ''
+    publish_date = container.find(id='video_date').find(class_='text').get_text()
+    duration = container.find(id='video_length').find(class_='text').get_text()
+    jav_library_actor = get_jav_library_info(container, 'video_cast', 'cast')
+    series = ''
+    series_url = ''
+    maker = container.find(id='video_maker').a.get_text()
+    maker_url = container.find(id='video_maker').a['href']
+    if container.find(id='video_label').a:
+        publish = container.find(id='video_label').a.get_text()
+        publish_url = container.find(id='video_label').a['href']
     else:
-        cursor.close()
-        conn.close()
+        publish = ''
+        publish_url = ''
+    tag = get_jav_library_info(container, 'video_genres', 'genre')
+    if check_is_add(dvd_id):
+        print("update", dvd_id, cover, publish, publish_url, jav_library_actor, jav_library_url)
+        cursor.execute(jav_library_update,
+                       (cover, publish, publish_url, jav_library_actor, jav_library_url, tag, dvd_id))
+    else:
+        print("insert", dvd_id, main_actor, cover, main_image, dvd_id, dmm_id, title, publish_date, duration,
+              dvd_id_url, series, series_url, maker, maker_url, '', '', '', publish, publish_url, jav_library_actor,
+              jav_library_url, tag, 0, 0)
+        cursor.execute(jav_db_insert, (
+            main_actor, cover, main_image, dvd_id, dmm_id, title, publish_date, duration, dvd_id_url, series,
+            series_url, maker, maker_url, '', '', '', publish, publish_url, jav_library_actor, jav_library_url, tag, 0,
+            0))
+    conn.commit()
+
+
+def get_jav_library_info(container, type, detail):
+    _actor = []
+    content = container.find(id=type).findAll(class_=detail)
+    if len(content) > 0:
+        for item in content:
+            _str = item.a.get_text() + "-" + item.a['href'].split('=')[1]
+            _actor.append(_str)
+        return "|".join(_actor)
+    else:
+        return ''
 
 
 def get_seesaa_movie():
@@ -226,7 +281,7 @@ def get_seesaa_movie():
 
 
 def check_is_add_by_cid(cid):
-    cursor.execute("select * from movie where dmmid= '" + cid + "'")
+    cursor.execute("select * from movie where dmm_id= '" + cid + "'")
     result = cursor.fetchall()
     if len(result) == 0:
         return False
@@ -243,8 +298,17 @@ def check_is_add(dvd_id):
         return True
 
 
+def check_is_full(dvd_id):
+    cursor.execute("select * from movie where dvd_id= '" + dvd_id + "' and javlibrary_url != ''")
+    result = cursor.fetchall()
+    if len(result) == 0:
+        return False
+    else:
+        return True
+
+
 def trans():
-    cursor.execute("select * from movie where dmmid = ''")
+    cursor.execute("select * from movie where dmm_id = ''")
     result = cursor.fetchall()
     print("共" + str(len(result)) + "部")
     for item in result:
@@ -261,7 +325,7 @@ def trans():
                 title = element.find(class_='img').img['alt']
                 local_cid = item[3].replace('-', '').lower()
                 if title == item[4] or cid == local_cid:
-                    sql = "UPDATE movie SET dmmid = %s WHERE dvdid = %s "
+                    sql = "UPDATE movie SET dmm_id = %s WHERE dvd_id = %s "
                     cursor.execute(sql, (cid, item[3]))
                     conn.commit()
                     print(cid + " :finish")
